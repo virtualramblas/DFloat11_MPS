@@ -1,0 +1,6 @@
+torch==2.9.1
+torchvision==0.24.1
+pyobjc-framework-Metal==12.1
+pyobjc-framework-MetalKit==12.1
+transformers==4.57.3
+accelerate==1.12.0
