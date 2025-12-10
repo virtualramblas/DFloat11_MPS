@@ -1,3 +1,11 @@
+# Copyright 2025 Tianyi Zhang (Modified for Apple Silicon/Metal)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
 import math
 import os
 import re
@@ -389,72 +397,99 @@ class MetalDecoder:
             output_size_bytes = output_tensor.numel() * output_tensor.element_size()
             print(f"Output buffer size: {output_size_bytes} bytes ({output_tensor.numel()} elements)", file=stderr)
             
-            # Get buffer contents pointer
-            contents_ptr = output_buffer.contents()
-            if contents_ptr is None:
-                raise RuntimeError("Failed to get buffer contents pointer")
-            
-            print("Got buffer contents pointer", file=stderr)
-            
-            # Read data directly using ctypes with proper pointer handling
-            import ctypes
             import numpy as np
+            from Foundation import NSData
             
-            # Extract pointer address from objc object
-            # Use objc's __c_void_p__ method or convert through ctypes
+            print("Reading Metal buffer data using NSData...", file=stderr)
+            
             try:
-                # Method 1: Try to get the pointer value using objc internals
-                if hasattr(contents_ptr, '__c_void_p__'):
-                    ptr_value = contents_ptr.__c_void_p__().value
-                else:
-                    # Method 2: Use ctypes.cast with c_void_p
-                    ptr_value = ctypes.cast(contents_ptr, ctypes.c_void_p).value
+                # Use NSData to wrap the buffer - this should work with Metal buffers
+                # Create NSData from the buffer without copying
+                ns_data = NSData.dataWithBytesNoCopy_length_freeWhenDone_(
+                    output_buffer.contents(),
+                    output_size_bytes,
+                    False  # Don't free when done - Metal owns this memory
+                )
                 
-                print(f"Buffer pointer address: {hex(ptr_value)}", file=stderr)
+                if ns_data is None:
+                    raise RuntimeError("Failed to create NSData from Metal buffer")
+                
+                print(f"Created NSData wrapper, length: {ns_data.length()}", file=stderr)
+                
+                # Get bytes from NSData
+                # NSData.bytes() returns a pointer we can work with
+                ns_bytes = ns_data.bytes()
+                
+                # Now convert using ctypes or objc methods
+                # Try to get the data as a Python bytes object
+                try:
+                    # Method 1: Use tobytes() if available
+                    python_bytes = ns_data.bytes().tobytes(output_size_bytes)
+                    print(f"Got bytes using tobytes(), length: {len(python_bytes)}", file=stderr)
+                except AttributeError:
+                    # Method 2: Create bytes from NSData using list comprehension
+                    print("tobytes() not available, reading byte-by-byte from NSData...", file=stderr)
+                    byte_list = []
+                    for i in range(output_size_bytes):
+                        # Access bytes using getBytes:range:
+                        byte_val = ns_data.bytes()[i]
+                        byte_list.append(byte_val)
+                    python_bytes = bytes(byte_list)
+                    print(f"Read {len(python_bytes)} bytes", file=stderr)
+                
+                # Convert to numpy array
+                if output_tensor.dtype == torch.float16:
+                    numpy_output = np.frombuffer(python_bytes, dtype=np.float16)
+                    cpu_output = torch.from_numpy(numpy_output.copy())
+                elif output_tensor.dtype == torch.bfloat16:
+                    numpy_output = np.frombuffer(python_bytes, dtype=np.uint16)
+                    cpu_output = torch.from_numpy(numpy_output.copy()).view(torch.bfloat16)
+                else:
+                    numpy_output = np.frombuffer(python_bytes, dtype=np.uint16)
+                    cpu_output = torch.from_numpy(numpy_output.copy())
+                
+                print(f"Successfully created numpy array with {len(numpy_output)} elements", file=stderr)
                 
             except Exception as e:
-                print(f"Error extracting pointer address: {e}", file=stderr)
-                raise RuntimeError(f"Cannot extract Metal buffer pointer address: {e}")
-            
-            # Create a ctypes buffer from the Metal buffer contents
-            try:
-                # Create ctypes pointer from address
-                if output_tensor.dtype == torch.float16:
-                    c_array = (ctypes.c_uint16 * output_tensor.numel()).from_address(ptr_value)
-                    numpy_output = np.frombuffer(c_array, dtype=np.float16).copy()
-                    cpu_output = torch.from_numpy(numpy_output)
-                elif output_tensor.dtype == torch.bfloat16:
-                    c_array = (ctypes.c_uint16 * output_tensor.numel()).from_address(ptr_value)
-                    numpy_output = np.frombuffer(c_array, dtype=np.uint16).copy()
-                    cpu_output = torch.from_numpy(numpy_output).view(torch.bfloat16)
-                elif output_tensor.dtype == torch.uint16:
-                    c_array = (ctypes.c_uint16 * output_tensor.numel()).from_address(ptr_value)
-                    numpy_output = np.frombuffer(c_array, dtype=np.uint16).copy()
-                    cpu_output = torch.from_numpy(numpy_output)
-                else:
-                    raise ValueError(f"Unsupported output dtype: {output_tensor.dtype}")
+                print(f"Error with NSData method: {e}", file=stderr)
+                import traceback
+                traceback.print_exc()
                 
-                print(f"Created numpy array with shape {numpy_output.shape}", file=stderr)
-                
-            except Exception as e:
-                print(f"Error with direct pointer access: {e}", file=stderr)
-                print("Falling back to byte copy method...", file=stderr)
-                
-                # Fallback: copy bytes manually
-                byte_array = bytearray(output_size_bytes)
-                ptr = ctypes.cast(ptr_value, ctypes.POINTER(ctypes.c_ubyte))
-                for i in range(output_size_bytes):
-                    byte_array[i] = ptr[i]
-                
-                if output_tensor.dtype == torch.float16:
-                    numpy_output = np.frombuffer(byte_array, dtype=np.float16)
-                    cpu_output = torch.from_numpy(numpy_output)
-                elif output_tensor.dtype == torch.bfloat16:
-                    numpy_output = np.frombuffer(byte_array, dtype=np.uint16)
-                    cpu_output = torch.from_numpy(numpy_output).view(torch.bfloat16)
-                else:
-                    numpy_output = np.frombuffer(byte_array, dtype=np.uint16)
-                    cpu_output = torch.from_numpy(numpy_output)
+                # Last resort: use getBytes:length: from NSData
+                print("Trying NSData getBytes:length: method...", file=stderr)
+                try:
+                    ns_data = NSData.dataWithBytesNoCopy_length_freeWhenDone_(
+                        output_buffer.contents(),
+                        output_size_bytes,
+                        False
+                    )
+                    
+                    # Create a mutable buffer to receive the bytes
+                    import ctypes
+                    buffer = (ctypes.c_ubyte * output_size_bytes)()
+                    
+                    # Copy data from NSData to our buffer
+                    ns_data.getBytes_length_(buffer, output_size_bytes)
+                    
+                    # Convert to bytes
+                    python_bytes = bytes(buffer)
+                    
+                    if output_tensor.dtype == torch.float16:
+                        numpy_output = np.frombuffer(python_bytes, dtype=np.float16)
+                        cpu_output = torch.from_numpy(numpy_output.copy())
+                    elif output_tensor.dtype == torch.bfloat16:
+                        numpy_output = np.frombuffer(python_bytes, dtype=np.uint16)
+                        cpu_output = torch.from_numpy(numpy_output.copy()).view(torch.bfloat16)
+                    else:
+                        numpy_output = np.frombuffer(python_bytes, dtype=np.uint16)
+                        cpu_output = torch.from_numpy(numpy_output.copy())
+                    
+                    print(f"Successfully read buffer using getBytes:length:", file=stderr)
+                    
+                except Exception as e2:
+                    print(f"Error with getBytes:length: {e2}", file=stderr)
+                    traceback.print_exc()
+                    raise RuntimeError(f"Cannot read Metal buffer data. All methods failed. Last error: {e2}")
             
             # Reshape to match output tensor shape
             cpu_output = cpu_output.reshape(output_tensor.shape)
