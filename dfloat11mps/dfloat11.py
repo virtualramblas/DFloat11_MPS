@@ -1,11 +1,3 @@
-# Copyright 2025 Tianyi Zhang (Modified for Apple Silicon/Metal)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-
 import math
 import os
 import re
@@ -17,8 +9,6 @@ import torch
 import torch.nn as nn
 
 # Metal support for Apple Silicon
-import objc
-from Foundation import NSData
 from Metal import (
     MTLCreateSystemDefaultDevice,
     MTLResourceStorageModeShared,
