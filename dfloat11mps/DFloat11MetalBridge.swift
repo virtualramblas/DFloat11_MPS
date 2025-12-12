@@ -1,5 +1,5 @@
-import Foundation
 import Metal
+import Darwin
 
 // MARK: - C-compatible interface
 
