@@ -9,7 +9,6 @@ import torch
 from pathlib import Path
 import sys
 
-
 class MetalDecoder:
     """Python wrapper for Swift Metal decoder."""
     
@@ -151,12 +150,6 @@ def get_metal_decoder():
         _metal_decoder = MetalDecoder()
     return _metal_decoder
 
-
-# ============================================================================
-# Modified decode hook for dfloat11.py
-# Replace the decode_hook function with this version:
-# ============================================================================
-
 def get_hook_swift(threads_per_block, bytes_per_thread):
     """
     Creates a PyTorch forward pre-hook using the Swift Metal decoder.
@@ -165,8 +158,6 @@ def get_hook_swift(threads_per_block, bytes_per_thread):
         threads_per_block = threads_per_block[0]
 
     def decode_hook(module, _):
-        from dfloat11_metal_wrapper import get_metal_decoder
-        
         n_elements = module.sign_mantissa.numel()
         n_bytes = module.encoded_exponent.numel()
         n_luts = module.luts.shape[0]
