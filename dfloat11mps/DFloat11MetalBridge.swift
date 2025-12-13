@@ -1,3 +1,7 @@
+// DFloat11MetalBridge.swift
+// Swift wrapper for Metal kernel execution with proper buffer management
+// This can be compiled as a C-compatible library for Python
+
 import Metal
 import Darwin
 
@@ -291,21 +295,60 @@ class DFloat11MetalDecoder {
         sharedMemSize: Int,
         threadsPerBlock: Int
     ) throws {
+        print("Swift decode called with:")
+        print("  n_luts: \(nLuts), n_bytes: \(nBytes), n_elements: \(nElements)")
+        print("  Buffer sizes - luts: \(lutsSize), encoded: \(encodedSize), sign: \(signSize)")
+        print("  threads_per_block: \(threadsPerBlock), shared_mem: \(sharedMemSize)")
+        
         // Create Metal buffers from raw pointers
-        guard let lutsBuffer = device.makeBuffer(bytes: luts, length: lutsSize, options: .storageModeShared),
-              let encodedBuffer = device.makeBuffer(bytes: encoded, length: encodedSize, options: .storageModeShared),
-              let signBuffer = device.makeBuffer(bytes: signMantissa, length: signSize, options: .storageModeShared),
-              let outposBuffer = device.makeBuffer(bytes: outputPositions, length: outposSize, options: .storageModeShared),
-              let gapsBuffer = device.makeBuffer(bytes: gaps, length: gapsSize, options: .storageModeShared),
-              let outputBuffer = device.makeBuffer(length: outputSize, options: .storageModeShared) else {
+        guard let lutsBuffer = device.makeBuffer(bytes: luts, length: lutsSize, options: .storageModeShared) else {
+            print("Failed to create luts buffer")
             throw DecoderError.bufferCreationFailed
         }
         
+        guard let encodedBuffer = device.makeBuffer(bytes: encoded, length: encodedSize, options: .storageModeShared) else {
+            print("Failed to create encoded buffer")
+            throw DecoderError.bufferCreationFailed
+        }
+        
+        guard let signBuffer = device.makeBuffer(bytes: signMantissa, length: signSize, options: .storageModeShared) else {
+            print("Failed to create sign buffer")
+            throw DecoderError.bufferCreationFailed
+        }
+        
+        // Output positions buffer must be mutable (kernel writes to it)
+        // Copy the input data and create a writable buffer
+        guard let outposBuffer = device.makeBuffer(bytes: outputPositions, length: outposSize, options: .storageModeShared) else {
+            print("Failed to create output positions buffer")
+            throw DecoderError.bufferCreationFailed
+        }
+        
+        guard let gapsBuffer = device.makeBuffer(bytes: gaps, length: gapsSize, options: .storageModeShared) else {
+            print("Failed to create gaps buffer")
+            throw DecoderError.bufferCreationFailed
+        }
+        
+        guard let outputBuffer = device.makeBuffer(length: outputSize, options: .storageModeShared) else {
+            print("Failed to create output buffer")
+            throw DecoderError.bufferCreationFailed
+        }
+        
+        print("All Metal buffers created successfully")
+        
+        print("All Metal buffers created successfully")
+        
         // Create command buffer and encoder
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            print("Failed to create command buffer")
             throw DecoderError.commandBufferCreationFailed
         }
+        
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            print("Failed to create compute encoder")
+            throw DecoderError.commandBufferCreationFailed
+        }
+        
+        print("Command buffer and encoder created")
         
         encoder.setComputePipelineState(pipeline)
         
@@ -317,6 +360,8 @@ class DFloat11MetalDecoder {
         encoder.setBuffer(gapsBuffer, offset: 0, index: 4)
         encoder.setBuffer(outputBuffer, offset: 0, index: 5)
         
+        print("Buffers set")
+        
         // Set constants
         var nLutsCopy = nLuts
         var nBytesCopy = nBytes
@@ -325,12 +370,18 @@ class DFloat11MetalDecoder {
         encoder.setBytes(&nBytesCopy, length: MemoryLayout<UInt32>.size, index: 7)
         encoder.setBytes(&nElementsCopy, length: MemoryLayout<UInt32>.size, index: 8)
         
+        print("Constants set")
+        
         // Set threadgroup memory
         encoder.setThreadgroupMemoryLength(sharedMemSize, index: 0)
+        
+        print("Threadgroup memory set: \(sharedMemSize) bytes")
         
         // Calculate grid size
         let blocksPerGrid = (Int(nBytes) + (threadsPerBlock * 8) - 1) / (threadsPerBlock * 8)
         let totalThreads = blocksPerGrid * threadsPerBlock
+        
+        print("Grid configuration: \(blocksPerGrid) blocks, \(threadsPerBlock) threads/block, \(totalThreads) total")
         
         let gridSize = MTLSize(width: totalThreads, height: 1, depth: 1)
         let threadgroupSize = MTLSize(width: threadsPerBlock, height: 1, depth: 1)
@@ -339,18 +390,32 @@ class DFloat11MetalDecoder {
         encoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
         
+        print("Kernel dispatched, waiting for completion...")
+        
         // Commit and wait
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         
+        print("Kernel execution completed with status: \(commandBuffer.status.rawValue)")
+        
         // Check for errors
         if let error = commandBuffer.error {
+            print("Kernel execution error: \(error.localizedDescription)")
             throw DecoderError.executionFailed(error.localizedDescription)
         }
+        
+        if commandBuffer.status == .error {
+            print("Command buffer status is error")
+            throw DecoderError.executionFailed("Command buffer execution failed")
+        }
+        
+        print("Copying output buffer (\(outputSize) bytes) back to host memory...")
         
         // Copy output buffer back to the provided pointer
         let outputPointer = outputBuffer.contents()
         memcpy(output, outputPointer, outputSize)
+        
+        print("Decode completed successfully")
     }
 }
 

@@ -32,22 +32,22 @@ class MetalDecoder:
         self.lib.dfloat11_decode.argtypes = [
             ctypes.c_void_p,  # decoder
             ctypes.c_void_p,  # luts
-            ctypes.c_int,     # luts_size
+            ctypes.c_size_t,  # luts_size (changed from c_int)
             ctypes.c_void_p,  # encoded
-            ctypes.c_int,     # encoded_size
+            ctypes.c_size_t,  # encoded_size (changed from c_int)
             ctypes.c_void_p,  # sign_mantissa
-            ctypes.c_int,     # sign_size
+            ctypes.c_size_t,  # sign_size (changed from c_int)
             ctypes.c_void_p,  # output_positions
-            ctypes.c_int,     # outpos_size
+            ctypes.c_size_t,  # outpos_size (changed from c_int)
             ctypes.c_void_p,  # gaps
-            ctypes.c_int,     # gaps_size
+            ctypes.c_size_t,  # gaps_size (changed from c_int)
             ctypes.c_void_p,  # output
-            ctypes.c_int,     # output_size
+            ctypes.c_size_t,  # output_size (changed from c_int)
             ctypes.c_uint32,  # n_luts
             ctypes.c_uint32,  # n_bytes
             ctypes.c_uint32,  # n_elements
-            ctypes.c_int,     # shared_mem_size
-            ctypes.c_int,     # threads_per_block
+            ctypes.c_size_t,  # shared_mem_size (changed from c_int)
+            ctypes.c_size_t,  # threads_per_block (changed from c_int)
         ]
         
         # Create decoder instance
@@ -114,17 +114,17 @@ class MetalDecoder:
         # Call Swift function
         result = self.lib.dfloat11_decode(
             self.decoder,
-            luts_ptr, luts_np.nbytes,
-            encoded_ptr, encoded_np.nbytes,
-            sign_ptr, sign_np.nbytes,
-            outpos_ptr, outpos_np.nbytes,
-            gaps_ptr, gaps_np.nbytes,
-            output_ptr, output_np.nbytes,
+            luts_ptr, ctypes.c_size_t(luts_np.nbytes),
+            encoded_ptr, ctypes.c_size_t(encoded_np.nbytes),
+            sign_ptr, ctypes.c_size_t(sign_np.nbytes),
+            outpos_ptr, ctypes.c_size_t(outpos_np.nbytes),
+            gaps_ptr, ctypes.c_size_t(gaps_np.nbytes),
+            output_ptr, ctypes.c_size_t(output_np.nbytes),
             ctypes.c_uint32(n_luts),
             ctypes.c_uint32(n_bytes),
             ctypes.c_uint32(n_elements),
-            ctypes.c_int(shared_mem_size),
-            ctypes.c_int(threads_per_block)
+            ctypes.c_size_t(shared_mem_size),
+            ctypes.c_size_t(threads_per_block)
         )
         
         if result != 0:
