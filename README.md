@@ -1,7 +1,7 @@
 # DFloat11_MPS
 DFloat11 for Apple Silicon.  
 ## Build Instructions
-### Prerequisites
+#### Prerequisites
 ```bash
 # Ensure you have Xcode Command Line Tools
 xcode-select --install
@@ -9,7 +9,7 @@ xcode-select --install
 # Verify the Swift compiler
 swiftc --version
 ```  
-### Using the provide Makefile
+#### Using the provided Makefile
 ```bash
 cd dfloat11mps
 
