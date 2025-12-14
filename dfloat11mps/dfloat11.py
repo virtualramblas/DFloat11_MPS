@@ -1,6 +1,7 @@
 import math
 import os
 import re
+import platform
 from sys import stderr
 from typing import Optional, Dict, Union
 from tqdm import tqdm
@@ -20,7 +21,15 @@ from huggingface_hub import snapshot_download
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoConfig, GenerationConfig
 from transformers.modeling_utils import no_init_weights
-
+# Check if we're on Apple Silicon
+USE_SWIFT_METAL = (
+    platform.system() == 'Darwin' and 
+    platform.machine() == 'arm64'
+)
+if USE_SWIFT_METAL:
+    from dfloat11mps.dfloat11_metal_wrapper import get_metal_decoder, get_hook_swift
+else:
+    pass
 
 # Metal kernel source code
 METAL_KERNEL_SOURCE = """
@@ -636,51 +645,10 @@ def get_hook(threads_per_block, bytes_per_thread):
     Creates a PyTorch forward pre-hook that decodes compressed DFloat11 weights
     using Metal on Apple Silicon.
     """
-    if isinstance(threads_per_block, (list, tuple)):
-        threads_per_block = threads_per_block[0]
-
-    def decode_hook(module, _):
-        n_elements = module.sign_mantissa.numel()
-        n_bytes = module.encoded_exponent.numel()
-        n_luts = module.luts.shape[0]
-
-        device = module.encoded_exponent.device
-        
-        # Verify we're on MPS device
-        if device.type != 'mps':
-            raise RuntimeError(f"DFloat11 Metal decoder only works on MPS device, got {device}")
-        
-        reconstructed = TensorManager.get_tensor(device, n_elements)
-
-        # Use Metal decoder
-        decoder = get_metal_decoder()
-        
-        decoder.decode(
-            luts_tensor=module.luts,
-            encoded_exp_tensor=module.encoded_exponent,
-            sign_mant_tensor=module.sign_mantissa,
-            out_pos_tensor=module.output_positions,
-            gaps_tensor=module.gaps,
-            output_tensor=reconstructed,
-            n_luts=n_luts,
-            n_bytes=n_bytes,
-            n_elements=n_elements,
-            shared_mem_size=module.shared_mem_size,
-            threads_per_block=threads_per_block
-        )
-
-        # Inject reconstructed weights
-        if isinstance(module, nn.Linear):
-            module.weight = reconstructed.view(module.out_features, module.in_features)
-        elif isinstance(module, nn.Embedding):
-            module.weight = reconstructed.view(module.num_embeddings, module.embedding_dim)
-        else:
-            weights = torch.tensor_split(reconstructed, module.split_positions)
-            for sub_module, weight in zip(module.weight_injection_modules, weights):
-                sub_module.weight = weight.view(sub_module.out_features, sub_module.in_features)
-
-    return decode_hook
-
+    if USE_SWIFT_METAL:
+        return get_hook_swift(threads_per_block, bytes_per_thread)
+    else:
+        return None
 
 def load_and_replace_tensors(model, directory_path, dfloat11_config):
     """
