@@ -14,14 +14,14 @@ swiftc --version
 ```bash
 cd dfloat11mps
 
+# Clean build artifacts
+make clean
+
 # Build the extension
 make
 
 # Test it
 make test
-
-# Clean build artifacts
-make clean
 ```  
 ## Inference
-Just run the ```inference.py``` script, passing a model id from the Hugging Face Hub, the max token count and a prompt.  
+Just run the ```inference.py``` script, passing a model id from the Hugging Face Hub, the max token count, the temperature and a prompt.  
